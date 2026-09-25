@@ -2,6 +2,8 @@
 
 > WP Plainview Activity Monitor auth RCE fix: broken manual cookie parse → stable Session handling. CVE-2018-15877 educational fix.
 
+> Fixed by: **GODK**
+
 ## Original
 
 - Exploit Title: WordPress Plugin Plainview Activity Monitor 20161228 - Remote Code Execution (RCE) (Authenticated) (2)
@@ -58,6 +60,23 @@ Type `exit` to quit.
 - `python3 -m py_compile 50110-fixed.py` — OK
 - `normalize_target` / `extract_dig_output` unit check — OK
 - Lab test: `run_command('whoami')` → `www-data`
+
+## Before / After
+
+- `getCookie()` manual `Set-Cookie` split → `login()` with `requests.Session()` + `wordpress_logged_in` check
+- `getCookie()` per loop → single session reuse
+- `split(MARKER)[1]` crash → `extract_dig_output()` guard + empty-vs-missing handling
+- Hardcoded `http://` + globals → `normalize_target()` / `build_base()` + args
+
+## Changelog
+
+- `5427e6d` Fix broken cookie to session handling for WP Plainview RCE
+- `0a10e3b` Update fix: distinguish empty output from session fail, keep pipe delimiter
+
+## Credits
+
+- Original exploit: Beren Kuday GORUN (Exploit-DB 50110, CVE-2018-15877)
+- Fix / maintenance: **GODK**
 
 ## Disclaimer
 
