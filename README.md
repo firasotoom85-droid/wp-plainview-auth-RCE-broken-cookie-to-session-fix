@@ -34,6 +34,7 @@ In original `50110.py`:
 - `normalize_target()` / `build_base()` accept `TARGET_IP`, `http://TARGET_IP/`, `TARGET_IP:port`.
 - Single session reused for `poc()` + `exploit()` loop.
 - `TIMEOUT=10`, `User-Agent`, `exit/quit/q` + `Ctrl+C` handling, `main()` + `__main__` guard.
+- Empty-vs-missing handling: `cd` / empty file / stderr-only permission error returns `[*] empty output` with absolute-path hint, `[!] No dig output` only on real plugin/session fail with `DEBUG len/marker/url`. Keeps `|` delimiter (`;` filtered), warns against typing own `| & > ;`.
 
 ## Usage
 
